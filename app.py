@@ -51,13 +51,6 @@ DARK = (17, 17, 17)
 GRAY = (80, 80, 80)
 LINE = (27, 92, 85)
 
-WAIT_HTML = """
-<div class="wait">
-  <span class="spin" aria-hidden="true"></span>
-  <b>Analyzing ECG…</b>
-</div>
-"""
-
 
 def _save_rgb(src, dest: Path):
     if isinstance(src, (str, Path)):
@@ -257,9 +250,8 @@ def _analyze_gpu(image_path, source, patient):
 
 
 def analyze(image_path, source, patient):
-    yield WAIT_HTML, None, None, None, gr.update(visible=True)
     try:
-        result = _analyze_gpu(image_path, source, patient)
+        return _analyze_gpu(image_path, source, patient)
     except Exception as exc:
         text = str(exc).lower()
         quota = any(
@@ -267,10 +259,8 @@ def analyze(image_path, source, patient):
             for word in ("quota", "zerogpu", "overquota", "gpu limit", "no gpu")
         )
         if quota:
-            result = _analyze(image_path, source, patient)
-        else:
-            raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
-    yield result
+            return _analyze(image_path, source, patient)
+        raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
 
 
 CSS = """
@@ -378,21 +368,36 @@ body::before {
   font-weight: 700;
   line-height: 1.45;
 }
-.wait {
+.wait-pop {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(0, 0, 0, 0.45) !important;
+}
+.wait-pop[hidden] {
+  display: none !important;
+}
+.wait-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 14px 18px;
+  border-radius: 14px;
   border: 1px solid #20c4a0;
-  background: rgba(32, 196, 160, 0.16);
-  color: var(--text) !important;
-  font-size: 14px;
+  background: #0c202a;
+  color: #e7f4f2;
+  font-size: 15px;
 }
 .spin {
   width: 16px;
   height: 16px;
+  flex: 0 0 16px;
   border: 2px solid #20c4a0;
   border-top-color: transparent;
   border-radius: 50%;
@@ -532,6 +537,16 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
         </div>
         """
     )
+    gr.HTML(
+        """
+        <div id="ecg-wait" class="wait-pop" hidden>
+          <div class="wait-card">
+            <span class="spin" aria-hidden="true"></span>
+            <b>Analyzing ECG…</b>
+          </div>
+        </div>
+        """
+    )
 
     image = gr.Image(
         type="filepath",
@@ -595,13 +610,40 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
     try { localStorage.setItem("ecg-theme", dark ? "dark" : "light"); } catch (e) {}
   };
   const saved = (() => { try { return localStorage.getItem("ecg-theme"); } catch (e) { return null; } })();
-  apply(saved || (root.classList.contains("dark") ? "dark" : "dark"));
+  apply(saved || "dark");
+
   const bind = () => {
     const d = document.getElementById("ecg-dark");
     const l = document.getElementById("ecg-light");
     if (d) d.onclick = () => apply("dark");
     if (l) l.onclick = () => apply("light");
   };
+
+  let wait = document.getElementById("ecg-wait");
+  if (wait && wait.parentElement !== document.body) {
+    document.body.appendChild(wait);
+  }
+  const show = () => {
+    wait = document.getElementById("ecg-wait");
+    if (wait) {
+      if (wait.parentElement !== document.body) document.body.appendChild(wait);
+      wait.hidden = false;
+    }
+  };
+  const hide = () => {
+    wait = document.getElementById("ecg-wait");
+    if (wait) wait.hidden = true;
+  };
+
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("button");
+    if (t && (t.textContent || "").includes("Analyze ECG")) show();
+  });
+
+  new MutationObserver(() => {
+    if (document.querySelector(".report") || document.querySelector("[class*='error']")) hide();
+  }).observe(document.body, { childList: true, subtree: true });
+
   bind();
   new MutationObserver(bind).observe(document.body, { childList: true, subtree: true });
 }
