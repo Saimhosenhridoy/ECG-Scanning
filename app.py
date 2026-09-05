@@ -11,6 +11,13 @@ from cam import run_cam
 from model_loader import INFER_TF, get_device, load_model, predict_tensor
 from preprocess import smart_clean
 
+
+def _quiet_api_info(self):
+    return {"named_endpoints": {}, "unnamed_endpoints": {}}
+
+
+gr.Blocks.get_api_info = _quiet_api_info
+
 RESEARCHER = {
     "name": "Abu Saim Hossen Hridoy",
     "dept": "Department of CSE",
@@ -544,4 +551,9 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(show_api=False)
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        show_api=False,
+        share=False,
+    )
