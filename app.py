@@ -8,7 +8,7 @@ from fpdf import FPDF
 from PIL import Image
 
 from cam import run_cam
-from model_loader import INFER_TF, get_device, load_model, predict_tensor
+from model_loader import INFER_TF, get_device, predict_tensor
 from preprocess import smart_clean
 
 
@@ -174,7 +174,9 @@ def make_pdf(patient, label, pct, message, why, probs, original, cleaned, cam):
         pdf.cell(img_w, 5, cap, align="C")
     pdf.set_text_color(*DARK)
 
-    out = tmp / "ecg_report.pdf"
+    safe = "".join(ch for ch in str(patient) if ch.isalnum() or ch in " -_")
+    safe = safe.strip().replace(" ", "_") or "Not_given"
+    out = tmp / f"{safe}_ECG_report.pdf"
     pdf.output(str(out))
     return str(out)
 
@@ -205,43 +207,59 @@ def result_html(label, pct, msg, why, probs):
     """
 
 
-@spaces.GPU(duration=120)
-def analyze(image_path, source, patient):
+def _analyze(image_path, source, patient):
     if image_path is None:
         raise gr.Error("Please upload an ECG image.")
 
+    src = source or "original"
+    if str(src).startswith("Full"):
+        src = "original"
+    elif str(src).startswith("Cropped"):
+        src = "cropped"
+
+    img = Image.open(image_path).convert("RGB")
+    cleaned = smart_clean(img, src)
+    result = predict_tensor(cleaned)
+
+    device = get_device()
+    tensor = INFER_TF(cleaned).unsqueeze(0).to(device)
+    tensor = tensor.clone().detach().requires_grad_(True)
+    overlay = run_cam(cleaned, tensor, result["pred_index"])
+
+    label = result["pred_label"]
+    pct = result["probabilities"][label] * 100
+    msg = MESSAGES.get(label, "")
+    why = FEATURES.get(label, "")
+    name = (str(patient).strip() if patient else "") or "Not given"
+
+    html = result_html(label, pct, msg, why, result["probabilities"])
     try:
-        src = source or "original"
-        if str(src).startswith("Full"):
-            src = "original"
-        elif str(src).startswith("Cropped"):
-            src = "cropped"
+        pdf_path = make_pdf(
+            name, label, pct, msg, why, result["probabilities"],
+            image_path, cleaned, overlay,
+        )
+    except Exception as pdf_err:
+        html += f"<p class='note'>PDF could not be created: {pdf_err}</p>"
+        pdf_path = None
+    return html, cleaned, overlay, pdf_path, gr.update(visible=True)
 
-        img = Image.open(image_path).convert("RGB")
-        cleaned = smart_clean(img, src)
-        result = predict_tensor(cleaned)
 
-        device = get_device()
-        tensor = INFER_TF(cleaned).unsqueeze(0).to(device)
-        overlay = run_cam(cleaned, tensor, result["pred_index"])
+@spaces.GPU(duration=60)
+def _analyze_gpu(image_path, source, patient):
+    return _analyze(image_path, source, patient)
 
-        label = result["pred_label"]
-        pct = result["probabilities"][label] * 100
-        msg = MESSAGES.get(label, "")
-        why = FEATURES.get(label, "")
-        name = (str(patient).strip() if patient else "") or "Not given"
 
-        html = result_html(label, pct, msg, why, result["probabilities"])
-        try:
-            pdf_path = make_pdf(
-                name, label, pct, msg, why, result["probabilities"],
-                image_path, cleaned, overlay,
-            )
-        except Exception as pdf_err:
-            html += f"<p class='note'>PDF could not be created: {pdf_err}</p>"
-            pdf_path = None
-        return html, cleaned, overlay, pdf_path, gr.update(visible=True)
+def analyze(image_path, source, patient):
+    try:
+        return _analyze_gpu(image_path, source, patient)
     except Exception as exc:
+        text = str(exc).lower()
+        quota = any(
+            word in text
+            for word in ("quota", "zerogpu", "overquota", "gpu limit", "no gpu")
+        )
+        if quota:
+            return _analyze(image_path, source, patient)
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
 
 
@@ -412,21 +430,25 @@ img { max-width: 100% !important; height: auto !important; }
 }
 .foot { color: var(--foot); font-size: 13px; margin-top: 18px; line-height: 1.5; }
 
-html[data-ecg="light"] footer,
-html[data-ecg="light"] footer *,
-html[data-ecg="light"] .api-docs,
-html[data-ecg="light"] .api-docs *,
-html[data-ecg="light"] code,
-html[data-ecg="light"] pre,
-html[data-ecg="light"] pre *,
-html[data-ecg="light"] table,
-html[data-ecg="light"] th,
-html[data-ecg="light"] td {
-  color: #0b1c20 !important;
+footer {
+  display: none !important;
 }
-html[data-ecg="light"] pre,
-html[data-ecg="light"] code {
-  background: #e8f2ef !important;
+
+#pdf-download {
+  margin: 10px 0 14px !important;
+}
+#pdf-download label,
+#pdf-download .label-wrap {
+  display: none !important;
+}
+#pdf-download button {
+  width: 100% !important;
+  min-height: 48px !important;
+  border-radius: 12px !important;
+  background: #20c4a0 !important;
+  color: #04241e !important;
+  font-weight: 700 !important;
+  font-size: 16px !important;
 }
 
 @media (max-width: 800px) {
@@ -508,7 +530,15 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
         with gr.Row():
             out_clean = gr.Image(label="Processed trace", height=220)
             out_cam = gr.Image(label="Highlight map", height=220)
-        out_pdf = gr.File(label="Download PDF report")
+        if hasattr(gr, "DownloadButton"):
+            out_pdf = gr.DownloadButton(
+                label="Download report",
+                value=None,
+                variant="primary",
+                elem_id="pdf-download",
+            )
+        else:
+            out_pdf = gr.File(label="Download report", elem_id="pdf-download")
 
     gr.HTML(
         f"""
@@ -551,9 +581,8 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        show_api=False,
-        share=False,
-    )
+    try:
+        demo.queue()
+    except Exception:
+        pass
+    demo.launch()

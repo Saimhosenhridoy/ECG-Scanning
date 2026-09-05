@@ -78,17 +78,19 @@ def load_model() -> nn.Module:
     return model
 
 
-@torch.inference_mode()
 def predict_tensor(image_pil) -> dict:
     model = load_model()
     device = get_device()
     x = INFER_TF(image_pil).unsqueeze(0).to(device)
-    logits = model(x)[0]
-    prob = torch.softmax(logits, dim=0).detach().cpu().tolist()
+    with torch.no_grad():
+        logits = model(x)[0]
+        prob = torch.softmax(logits, dim=0).detach().cpu().tolist()
     pred = int(max(range(len(prob)), key=lambda i: prob[i]))
     return {
         "pred_index": pred,
         "pred_label": CLASS_NAMES[pred],
-        "probabilities": {CLASS_NAMES[i]: round(float(prob[i]), 6) for i in range(len(CLASS_NAMES))},
+        "probabilities": {
+            CLASS_NAMES[i]: round(float(prob[i]), 6) for i in range(len(CLASS_NAMES))
+        },
         "device": str(device),
     }

@@ -23,9 +23,13 @@ class GradCAM:
         self.gradients = gout[0]
 
     def generate(self, input_tensor, target_class: int) -> np.ndarray:
+        x = input_tensor.clone().detach().requires_grad_(True)
         self.model.zero_grad(set_to_none=True)
-        output = self.model(input_tensor)
-        output[0, target_class].backward()
+        with torch.inference_mode(False), torch.enable_grad():
+            output = self.model(x)
+            output[0, target_class].backward()
+        if self.gradients is None or self.activations is None:
+            raise RuntimeError("Grad-CAM hooks did not run. Try again after restarting the app.")
         grads = self.gradients.detach().cpu().numpy()
         acts = self.activations.detach().cpu().numpy()
         pooled = np.mean(grads, axis=(2, 3))
