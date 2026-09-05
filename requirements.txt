@@ -1,0 +1,9 @@
+gradio>=4.44.0
+fpdf2>=2.8.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+torch
+torchvision
+opencv-python-headless
+pillow
+numpy
