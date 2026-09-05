@@ -51,6 +51,13 @@ DARK = (17, 17, 17)
 GRAY = (80, 80, 80)
 LINE = (27, 92, 85)
 
+WAIT_HTML = """
+<div class="wait">
+  <span class="spin" aria-hidden="true"></span>
+  <b>Analyzing ECG…</b>
+</div>
+"""
+
 
 def _save_rgb(src, dest: Path):
     if isinstance(src, (str, Path)):
@@ -250,8 +257,9 @@ def _analyze_gpu(image_path, source, patient):
 
 
 def analyze(image_path, source, patient):
+    yield WAIT_HTML, None, None, None, gr.update(visible=True)
     try:
-        return _analyze_gpu(image_path, source, patient)
+        result = _analyze_gpu(image_path, source, patient)
     except Exception as exc:
         text = str(exc).lower()
         quota = any(
@@ -259,8 +267,10 @@ def analyze(image_path, source, patient):
             for word in ("quota", "zerogpu", "overquota", "gpu limit", "no gpu")
         )
         if quota:
-            return _analyze(image_path, source, patient)
-        raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
+            result = _analyze(image_path, source, patient)
+        else:
+            raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
+    yield result
 
 
 CSS = """
@@ -367,6 +377,29 @@ body::before {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.45;
+}
+.wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #20c4a0;
+  background: rgba(32, 196, 160, 0.16);
+  color: var(--text) !important;
+  font-size: 14px;
+}
+.spin {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #20c4a0;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ecgspin .7s linear infinite;
+}
+@keyframes ecgspin {
+  to { transform: rotate(360deg); }
 }
 html[data-ecg="dark"] #ecg-dark,
 html[data-ecg="light"] #ecg-light {
