@@ -1,8 +1,9 @@
-from functools import lru_cache
+ from functools import lru_cache
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+from huggingface_hub import hf_hub_download
 from torchvision import models, transforms
 
 from preprocess import CLASS_NAMES
@@ -12,6 +13,9 @@ IMG_SIZE = 384
 NORMALIZE_MEAN = [0.485, 0.456, 0.406]
 NORMALIZE_STD = [0.229, 0.224, 0.225]
 
+HF_MODEL_REPO = "Saimhosenhridoy/ecg-convnext"
+HF_MODEL_FILE = "convnext_tiny_ecg.pth"
+
 INFER_TF = transforms.Compose(
     [
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
@@ -19,6 +23,20 @@ INFER_TF = transforms.Compose(
         transforms.Normalize(NORMALIZE_MEAN, NORMALIZE_STD),
     ]
 )
+
+
+def get_weight_path() -> Path:
+    local = Path(settings.model_path)
+    if local.exists():
+        return local
+    fallback = Path("weights") / HF_MODEL_FILE
+    if fallback.exists():
+        return fallback
+    downloaded = hf_hub_download(
+        repo_id=HF_MODEL_REPO,
+        filename=HF_MODEL_FILE,
+    )
+    return Path(downloaded)
 
 
 def build_model(num_classes: int = 4) -> nn.Module:
@@ -45,11 +63,11 @@ def get_device() -> torch.device:
 
 @lru_cache(maxsize=1)
 def load_model() -> nn.Module:
-    path = Path(settings.model_path)
+    path = get_weight_path()
     if not path.exists():
         raise FileNotFoundError(
             f"Weight file not found: {path}. "
-            "Put convnext_tiny_ecg.pth inside the weights folder."
+            f"Put {HF_MODEL_FILE} in weights/ or upload it to {HF_MODEL_REPO}"
         )
     device = get_device()
     model = build_model(len(CLASS_NAMES))
