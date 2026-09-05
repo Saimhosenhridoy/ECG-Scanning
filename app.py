@@ -1,8 +1,9 @@
-import tempfile
+ import tempfile
 from datetime import datetime
 from pathlib import Path
 
 import gradio as gr
+import spaces
 from fpdf import FPDF
 from PIL import Image
 
@@ -197,6 +198,7 @@ def result_html(label, pct, msg, why, probs):
     """
 
 
+@spaces.GPU(duration=120)
 def analyze(image_path, source, patient):
     if image_path is None:
         raise gr.Error("Please upload an ECG image.")
@@ -386,9 +388,7 @@ button.primary {
   min-height: 44px !important;
 }
 img { max-width: 100% !important; height: auto !important; }
-#ecg-upload {
-  min-height: 300px !important;
-}
+#ecg-upload { min-height: 300px !important; }
 #ecg-upload .image-container,
 #ecg-upload .image-frame,
 #ecg-upload .upload-container,
@@ -544,5 +544,4 @@ with gr.Blocks(title="ECG Classifier", theme=theme, css=CSS) as demo:
     )
 
 if __name__ == "__main__":
-    load_model()
-    demo.launch()
+    demo.launch(show_api=False)
